@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Hệ thống điểm danh</title>
+    <meta charset="UTF-8">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <!-- Include Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/5.5.5/firebase.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <!-- Include FileSaver.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+
+    <link rel="stylesheet" href="./style.css">
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css">
+    <!-- Font Awesome CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.10.20/css/dataTables.bootstrap4.min.css">
+    <!-- Include jQuery UI -->
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.0/themes/base/jquery-ui.css">
+</head>
+
+<body>
+    <div class="heading">
+        <h1>Hệ thống điểm danh</h1>
+    </div>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <i class="fa fa-table mr-1"></i>
+                Attendance Summary
+            </div>
+            <div class="card-body">
+                <button type="button" class="btn btn-primary" id="exportAllAttendanceData">
+                    <i class="fa fa-download" aria-hidden="true"></i> Export to Excel
+                </button>
+                <div>
+                    <table class="table table-bordered display responsive nowrap" id="buttonTable" width="100%" cellspacing="0" data-order="[]">
+                        <thead>
+                            <tr>
+                                <th>Mã Thẻ</th>
+                                <th>Tên Sinh Viên</th>
+                                <th>Liên Hệ</th>
+                                <th>Điểm Danh Gần Đây</th>
+                                <th>Trạng Thái</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="registerModal" style="display: none;">
+        <form>
+            <div class="form-group">
+                <label for="nameInput">Name</label>
+                <input type="text" class="form-control" id="nameInput" required>
+            </div>
+            <div class="form-group">
+                <label for="emailInput">Email</label>
+                <input type="email" class="form-control" id="emailInput" required>
+                <div id="emailError" style="color: red; display: none;">Vui lòng nhập địa chỉ email hợp lệ.</div>
+            </div>
+        </form>
+    </div>
+    <!-- Include jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Include DataTables JS -->
+    <script src="https://cdn.datatables.net/1.10.20/js/jquery.dataTables.min.js"></script>
+    <!-- Include DataTables Bootstrap JS -->
+    <script src="https://cdn.datatables.net/1.10.20/js/dataTables.bootstrap4.min.js"></script>
+    <!-- Include jQuery UI -->
+    <script src="https://code.jquery.com/ui/1.13.0/jquery-ui.js"></script>
+    <!-- Include Bootstrap JS -->
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js"></script>
+
+    <script>
+        $(document).ready(function () {
+            // Initialize Firebase
+            var config = {
+                apiKey: "AIzaSyAnzTdSwTOnP35QcO-TgfoS-q81WrpRHpU",
+                authDomain: "datn-ea67f.firebaseapp.com",
+                databaseURL: "https://datn-ea67f-default-rtdb.firebaseio.com",
+                projectId: "datn-ea67f",
+                storageBucket: "datn-ea67f.appspot.com",
+                messagingSenderId: "189687569885",
+                appId: "1:189687569885:web:bce304a77cf69a9d112a34",
+                measurementId: "G-PY8NLE1GXT"
+            };
+            firebase.initializeApp(config);
+            var database = firebase.database();
+            var table = $("#buttonTable").DataTable({
+                lengthChange: false,
+                paging: false,
+                ordering: false,
+            });
+
+            // Lắng nghe sự kiện child_added
+            database.ref("Check-in").on("child_added", function (childSnapshot) {
+                var carId = childSnapshot.key;
+                var time = childSnapshot.child("time").val();
+                var status = getStatus(time);
+                //console.log( 'status:', status)
+                // Chuyển đổi chuỗi time thành đối tượng Moment với múi giờ UTC+7
+                var timeObj = moment(time).utcOffset('+07:00');
+
+                // Lấy ngày từ time
+                var timeDate = timeObj.format('YYYY-MM-DD');
+
+                // Lấy buổi
+                var realTime = moment();
+                var session = realTime.hour() <= 12 ? "sáng" : "chiều";
+                //console.log(session)
+                                            // Hàm kiểm tra định dạng email
+                function validateEmail(email) {
+                        var re = /\S+@\S+\.\S+/;
+                        return re.test(email);
+                    }
+                    
+                // Truy vấn dữ liệu từ node User dựa trên carId
+                database.ref("User/" + carId).once("value", function (userSnapshot) {
+                    var name = userSnapshot.child("name").val();
+                    var email = userSnapshot.child("email").val();
+
+                    // Kiểm tra name và email có dữ liệu hay không
+                    if (!name || !email) {
+                        // Hiển thị modal khi thiếu thông tin người dùng
+                        $("#registerModal").dialog({
+                            modal: true,
+                            title: "Register",
+                            buttons: {
+                                "Submit": function () {
+                                    var newName = $("#nameInput").val();
+                                    var newEmail = $("#emailInput").val();
+                                    
+                                    if (newName && newEmail) {
+                                        if (validateEmail(newEmail) === false){
+                                        alert('sai định dạng email')
+                                    } else{
+                                    
+                                            database.ref("User/" + carId).set({
+                                            name: newName,
+                                            email: newEmail
+                                        });
+                                        
+                                        name = newName;
+                                        email = newEmail;
+                                        $(this).dialog("close");}
+                                    } else {
+                                        alert("Vui lòng nhập đầy đủ cả tên và email");
+                                    }
+                                },
+                                "Cancel": function () {
+                                    $(this).dialog("close");
+                                }
+                            }
+                        });
+                    }
+
+                    // Tạo hoặc cập nhật dữ liệu vào nút theo ngày
+                    database.ref("Attendance/" + timeDate + "/" + session + '/' + carId).set({
+                        carId: carId,
+                        name: name,
+                        email: email,
+                        time: time,
+                        status: status,
+                    });
+
+                    // Thêm thông tin vào bảng
+                    table.row.add([carId, name, email, time, status]).draw();
+                });
+            });
+
+            // Lắng nghe sự kiện child_changed
+            database.ref("Check-in").on("child_changed", function (childSnapshot) {
+                var carId = childSnapshot.key;
+                var time = childSnapshot.child("time").val();
+                var status = getStatus(time);
+                // Truy vấn dữ liệu từ node User dựa trên carId
+                database.ref("User/" + carId).once("value", function (userSnapshot) {
+                    var name = userSnapshot.child("name").val();
+                    var email = userSnapshot.child("email").val();
+
+                    // Cập nhật thông tin trong bảng
+                    table.row(function (idx, data, node) {
+                        return data[0] === carId;
+                    }).data([carId, name, email, time, status]).draw();
+                });
+            });
+function getStatus(time) {
+    
+    // Chuyển đổi thời gian điểm danh sang múi giờ UTC+7
+    var checkInTime = moment.utc(time);
+    var hour = checkInTime.format('HH:mm:ss'); // Lấy giờ từ thời gian check in
+
+    var currentTime = moment();
+    var session = currentTime.hour() <= 12 ? "sáng" : "chiều";
+
+    // Lấy ngày hiện tại và ngày của thời điểm điểm danh
+    var currentDate = currentTime.format('YYYY-MM-DD');
+    var checkInDate = checkInTime.format('YYYY-MM-DD');
+
+    // Nếu ngày điểm danh không trùng với ngày hiện tại, hiển thị "Chưa điểm danh"
+    if (checkInDate !== currentDate) {
+        return "Chưa điểm danh";
+    }
+
+    // Lấy giờ từ biến hour
+    var checkInHour = parseInt(hour.split(':')[0]);
+    var checkInMinute = parseInt(hour.split(':')[1]);
+    console.log('hour',checkInHour)
+
+    // Kiểm tra buổi sáng (trước 12:00 PM)
+    if (session === "sáng") {
+        if (checkInHour < 8 || (checkInHour === 8 && checkInMinute <= 5)) {
+            return "Đúng giờ (sáng)";
+        } else {
+            return "Muộn (sáng)";
+        }
+    } else if (session === "chiều") {
+        if (checkInHour < 12){
+            return "chưa điểm danh"
+        }
+        else if (checkInHour < 14 || (checkInHour === 14 && checkInMinute === 0)) {
+            return "Đúng giờ (chiều)";
+        } else {
+            return "Muộn (chiều)";
+        }
+    }
+}
+
+
+             // Lắng nghe sự kiện child_removed
+             database.ref("Check-in").on("child_removed", function (oldChildSnapshot) {
+                var carId = oldChildSnapshot.key;
+
+                // Xóa hàng tương ứng trong bảng
+                table.row(function (idx, data, node) {
+                    return data[0] === carId;
+                }).remove().draw();
+            });
+
+            // Lắng nghe sự kiện value của node User
+            database.ref("User").on("value", function (snapshot) {
+                snapshot.forEach(function (childSnapshot) {
+                    var carId = childSnapshot.key;
+                    var name = childSnapshot.child("name").val();
+                    var email = childSnapshot.child("email").val();
+                    
+                    // Cập nhật name và email trong bảng
+                    table.rows().every(function (rowIdx, tableLoop, rowLoop) {
+                        var data = this.data();
+
+                        if (data[0] === carId) {
+                            
+                            this.data([
+                                carId,
+                                name,
+                                email,
+                                data[3],
+                                data[4],
+                            ]).draw(false);
+                        }
+                    });
+                });
+            });
+            database.ref("User").on("child_removed", function(oldChildSnapshot) {
+    var carId = oldChildSnapshot.key;
+
+    // Xóa hàng tương ứng trong bảng
+    table.row(function(idx, data, node) {
+        return data[0] === carId;
+    }).remove().draw();
+
+});
+      
+    
+
+// Sự kiện khi người dùng submit form
+$("#registerModal form").submit(function (e) {
+    e.preventDefault();
+
+    var name = $("#nameInput").val();
+    var email = $("#emailInput").val();
+
+    // Kiểm tra email hợp lệ trước khi submit
+    if (!validateEmail(email)) {
+        // Hiển thị thông báo lỗi nếu email không hợp lệ
+        $("#emailError").show();
+        return;
+    }
+    saveUserData(name, email);
+});
+
+
+
+
+         
+// function scheduleDailyReset() {
+//     var now = moment();
+//     var nextReset = now.clone().startOf('day').add(12, 'hours'); // Đặt mốc reset đầu tiên vào 12:00 trưa
+//     var nextResetMidnight = now.clone().endOf('day').add(0, 'hours'); // Đặt mốc reset thứ hai vào 00:00 đêm
+
+//     if (now.isAfter(nextReset)) {
+//         nextReset.add(1, 'days');
+//     }
+
+//     var resetInterval = nextReset.diff(now);
+//     var resetIntervalMidnight = nextResetMidnight.diff(now);
+
+//     setTimeout(function() {
+//         resetStatus();
+//         scheduleDailyReset();
+//     }, resetInterval);
+
+//     setTimeout(function() {
+//         resetStatus();
+//         scheduleDailyReset();
+//     }, resetIntervalMidnight);
+// }
+
+// function resetStatus() {
+//     var today = moment().format('YYYY-MM-DD');
+//     database.ref("Attendance/" + today).once('value', function(snapshot) {
+//         snapshot.forEach(function(sessionSnapshot) {
+//             sessionSnapshot.forEach(function(childSnapshot) {
+//                 var carId = childSnapshot.key;
+//                 var session = sessionSnapshot.key;
+//                 database.ref("Attendance/" + today + "/" + session + "/" + carId + "/status").set("Chưa điểm danh");
+//             });
+//         });
+//     });
+// }
+
+// scheduleDailyReset();
+
+
+
+           // Hàm xuất toàn bộ dữ liệu từ nút "Attendance/" sang Excel
+           function exportAttendanceDataToExcel() {
+    var attendanceRef = firebase.database().ref("Attendance/");
+
+    var workbook = new ExcelJS.Workbook();
+    var worksheet = workbook.addWorksheet("Attendance Data");
+
+    // Thêm tiêu đề cho cột buổi vào danh sách cột
+    worksheet.addRow(["ngày", "Buổi", "mã thẻ", "Họ tên", "Email", "Điểm danh gần đây", "trạng thái"]);
+
+    var previousDate = null; // Biến để lưu trữ ngày trước đó
+    var previousBuoi = null; // Biến để lưu trữ buổi trước đó
+
+    attendanceRef.once("value").then(function(snapshot) {
+        snapshot.forEach(function(dateSnapshot) {
+            var date = dateSnapshot.key;
+
+            dateSnapshot.forEach(function(buoiSnapshot) {
+                var buoi = buoiSnapshot.key; // Lấy giá trị của buổi
+
+                buoiSnapshot.forEach(function(dataSnapshot) {
+                    var rowData = [];
+
+                    if (date !== previousDate) {
+                        rowData.push(date); // Thêm ngày vào hàng
+                        previousDate = date; // Cập nhật ngày trước đó
+                    } else {
+                        // Nếu ngày giống với ngày trước đó thì để trống ô
+                        rowData.push(""); // Ô trống cho ngày
+                    }
+
+                    if (buoi !== previousBuoi) {
+                        rowData.push(buoi); // Thêm buổi vào hàng
+                        previousBuoi = buoi; // Cập nhật buổi trước đó
+                    } else {
+                        // Nếu buổi giống với buổi trước đó thì để trống ô
+                        rowData.push(""); // Ô trống cho buổi
+                    }
+
+                    rowData.push(dataSnapshot.child("carId").val());
+                    rowData.push(dataSnapshot.child("name").val());
+                    rowData.push(dataSnapshot.child("email").val());
+                    rowData.push(dataSnapshot.child("time").val());
+                    rowData.push(dataSnapshot.child("status").val());
+
+                    worksheet.addRow(rowData);
+                });
+            });
+        });
+
+        return workbook.xlsx.writeBuffer();
+    }).then(function(buffer) {
+        var blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+        saveAs(blob, "Diemdanh.xlsx");
+    }).catch(function(error) {
+        console.error("Lỗi xuất dữ liệu sang Excel:", error);
+    });
+}
+
+$("#exportAllAttendanceData").click(function() {
+    exportAttendanceDataToExcel();
+});
+
+// Hàm tự động lưu dữ liệu vào Firebase sau mỗi buổi
+function saveAttendanceDataToFirebase() {
+    // Lấy ngày và buổi hiện tại
+    var currentDate = moment().utcOffset('+07:00').format('YYYY-MM-DD');
+    var session = moment().utcOffset('+07:00').hour() <= 12 ? 'sáng' : 'chiều';
+
+    // Lưu trữ dữ liệu từ bảng vào Firebase
+    var tableData = table.rows().data().toArray();
+    tableData.forEach(function (rowData) {
+        var carId = rowData[0];
+        var name = rowData[1];
+        var email = rowData[2];
+        var time = rowData[3];
+        var status = rowData[4];
+
+        // Tạo đường dẫn tới node trong Firebase
+        var firebasePath = "Attendance/" + currentDate + "/" + session + "/" + carId;
+
+        // Lưu dữ liệu mới vào Firebase
+        database.ref(firebasePath).set({
+            carId: carId,
+            name: name,
+            email: email,
+            time: time,
+            status: status
+        });
+    });
+}
+
+
+            // Lưu dữ liệu vào Firebase sau mỗi buổi (vào 12:00 và 24:00)
+            function scheduleSaveToFirebase() {
+                var now = moment();
+                var nextNoon = now.clone().startOf('day').add(12, 'hours'); // Thời gian 12:00 kế tiếp
+                var nextMidnight = now.clone().startOf('day').add(18, 'hours'); // Thời gian 18:00 kế tiếp
+
+                // Tính toán thời gian delay để gọi hàm saveAttendanceDataToFirebase
+                var delayNoon = nextNoon.diff(now);
+                var delayMidnight = nextMidnight.diff(now);
+
+                if (now.hour() >= 12) {
+                    // Nếu giờ hiện tại sau 12:00, đặt lại lần tiếp theo vào 12:00 ngày hôm sau
+                    delayNoon = nextNoon.add(1, 'day').diff(now);
+                }
+
+                // Đặt timeout để gọi saveAttendanceDataToFirebase vào 12:00
+                setTimeout(function () {
+                    saveAttendanceDataToFirebase();
+                    scheduleSaveToFirebase();
+                }, delayNoon);
+
+                // Đặt timeout để gọi saveAttendanceDataToFirebase vào 00:00
+                setTimeout(function () {
+                    saveAttendanceDataToFirebase();
+                    scheduleSaveToFirebase(); // Gọi lại để thiết lập lần tiếp theo
+                }, delayMidnight);
+            }
+
+            scheduleSaveToFirebase();
+
+
+    
+        });
+
+    </script>
+</body>
+
+</html>
